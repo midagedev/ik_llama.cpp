@@ -2248,6 +2248,12 @@ void llm_load_hparams(
                     if (!hparams.dflash_dsv4) {
                         throw std::runtime_error("dflash: hyper_connection.count is required for the official DSV4 schema");
                     }
+                    // A V4.1 draft has no learned output head: its hyper-connection mixes lag by one
+                    // sublayer and the last FFN's mix does the output collapse, exactly as in the
+                    // V4.1 body. The absence of output_hc_base.weight is the signature.
+                    hparams.dflash_dsv41 = ml.get_tensor_meta("output_hc_base.weight") == nullptr;
+                    LLAMA_LOG_INFO("%s: DSV4 draft flavor = %s\n", __func__,
+                            hparams.dflash_dsv41 ? "V4.1 (lagged hyper-connections, no output head)" : "V4");
 
                     ml.get_key("dflash.block_size", hparams.dflash_block_size, true);
                     ml.get_key(LLM_KV_TOKENIZER_MASK_ID, hparams.dflash_mask_token_id, true);
