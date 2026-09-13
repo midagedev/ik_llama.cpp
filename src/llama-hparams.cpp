@@ -2251,6 +2251,7 @@ void llm_load_hparams(
                     // sublayer and the last FFN's mix does the output collapse, exactly as in the
                     // V4.1 body. The absence of output_hc_base.weight is the signature.
                     hparams.dflash_dsv41 = ml.get_tensor_meta("output_hc_base.weight") == nullptr;
+                    hparams.dflash_block_bidir = hparams.dflash_dsv41;
                     LLAMA_LOG_INFO("%s: DSV4 draft flavor = %s\n", __func__,
                             hparams.dflash_dsv41 ? "V4.1 (lagged hyper-connections, no output head)" : "V4");
 
