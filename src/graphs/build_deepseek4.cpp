@@ -1106,9 +1106,8 @@ static ggml_tensor * ds4_attention(ggml_cgraph * gf, ggml_context * ctx0, llm_bu
         auto q = llm.llm_build_lora_mm(llm.lctx, ctx0, wq, qin);
         cb(q, (tag + "_b").c_str(), il);
         q = ggml_reshape_2d(ctx0, q, n_embd_head, nhead * n_tokens);
-        // V4 normalizes each head again after the up projection (a bare rms_norm when the layer has
-        // no weight for it); V4.1 normalizes only the low-rank part and the latent kv.
-        if (norm != nullptr || model.arch != LLM_ARCH_DEEPSEEK41) {
+        // a bare rms_norm when the layer has no weight for it
+        if (norm != nullptr || hparams.dsv4_q_head_norm) {
             q = llm.llm_build_norm(ctx0, q, hparams, norm, nullptr, LLM_NORM_RMS, cb, il);
             cb(q, (tag + "_norm").c_str(), il);
         }
@@ -1533,10 +1532,9 @@ ggml_cgraph * llm_build_context::build_deepseek4() {
     lctx.dsv4.top_k_a = nullptr;
     lctx.dsv4.top_k_b = nullptr;
 
-    // V4.1: the hyper-connection coefficients lag by one sublayer. A sublayer computes the mix the
-    // NEXT one collapses with; layer 0 gets a one-hot that selects the first copy, and the last
-    // FFN's mix collapses the copies at the output (which is why the file has no output_hc_*).
-    const bool hc_lag = model.arch == LLM_ARCH_DEEPSEEK41;
+    // lagged hyper-connections: a sublayer computes the mix the next one collapses with; layer 0
+    // gets a one-hot that selects the first copy, and the last FFN's mix collapses the output
+    const bool hc_lag = hparams.dsv4_hc_lag;
     ggml_tensor * hc_pre_mix = nullptr;
     if (hc_lag) {
         GGML_ASSERT(!is_mtp && "V4.1 MTP graph is not implemented");

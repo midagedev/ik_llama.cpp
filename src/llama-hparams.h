@@ -166,6 +166,13 @@ struct llama_hparams {
     // layer whose entry is itself is a source. Index keys and the indexer top-k are shared the
     // same way on their own sets of layers.
     bool dsv4_shared_streams = false;
+    // V4.1: the hyper-connection mix a sublayer computes is applied by the next one, and the
+    // last FFN's mix collapses the output (no learned output head). V4 uses the same mix
+    // twice and has a head.
+    bool dsv4_hc_lag = false;
+    // V4 re-normalizes every attention head after the up projection; V4.1 normalizes only the
+    // low-rank query and the latent kv.
+    bool dsv4_q_head_norm = true;
     std::array<int32_t, LLAMA_MAX_LAYERS> dsv41_kv_source        = {};
     std::array<int32_t, LLAMA_MAX_LAYERS> dsv41_index_key_source = {};
     std::array<int32_t, LLAMA_MAX_LAYERS> dsv41_topk_source      = {};

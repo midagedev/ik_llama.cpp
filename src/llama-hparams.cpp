@@ -2180,6 +2180,8 @@ void llm_load_hparams(
                         hparams.dsv4_ratio_b = ratio_b;
                         hparams.dsv4_overlap_a = false;
                         hparams.dsv4_overlap_b = false;
+                        hparams.dsv4_hc_lag = true;
+                        hparams.dsv4_q_head_norm = false;
                         LLAMA_LOG_INFO("%s: DeepSeek-V4.1 compressed streams: ratio %u and %u, shared from source layers\n", __func__, ratio_a, ratio_b);
                     }
                     if (hparams.dsv4_hc_mult == 0) {
