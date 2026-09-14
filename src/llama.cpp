@@ -5244,23 +5244,43 @@ static void llama_kv_prev_tokens(const llama_kv_cache & kv, const llama_batch & 
     res.assign((size_t) n_tokens*n, -1);
     if (n == 0 || !batch.token) return;
 
-    std::unordered_map<int64_t, llama_token> in_batch;
     auto key = [](llama_seq_id s, llama_pos p) { return ((int64_t) s << 32) | (uint32_t) p; };
+    auto seq_of = [&](uint32_t i) { return batch.seq_id ? batch.seq_id[i][0] : 0; };
+
+    // (seq, pos) -> token for everything in this batch, then the (seq, pos) it still needs
+    std::unordered_map<int64_t, llama_token> tokens;
+    std::unordered_set<int64_t> missing;
     for (uint32_t i = 0; i < n_tokens; ++i) {
-        const llama_seq_id s = batch.seq_id ? batch.seq_id[i][0] : 0;
-        in_batch[key(s, batch.pos[i])] = batch.token[i];
+        tokens[key(seq_of(i), batch.pos[i])] = batch.token[i];
     }
     for (uint32_t i = 0; i < n_tokens; ++i) {
-        const llama_seq_id s = batch.seq_id ? batch.seq_id[i][0] : 0;
+        for (uint32_t j = 0; j < n; ++j) {
+            const llama_pos p = batch.pos[i] - (llama_pos) (n - j);
+            if (p >= 0 && tokens.find(key(seq_of(i), p)) == tokens.end()) {
+                missing.insert(key(seq_of(i), p));
+            }
+        }
+    }
+    // one pass over the cells fills the misses; a decode step misses at most n per sequence
+    if (!missing.empty()) {
+        for (uint32_t c = 0; c < kv.size; ++c) {
+            const auto & cell = kv.cells[c];
+            if (cell.pos < 0 || cell.tok < 0) continue;
+            for (const llama_seq_id s : cell.seq_id) {
+                const int64_t k = key(s, cell.pos);
+                if (missing.erase(k)) {
+                    tokens[k] = cell.tok;
+                }
+            }
+            if (missing.empty()) break;
+        }
+    }
+    for (uint32_t i = 0; i < n_tokens; ++i) {
         for (uint32_t j = 0; j < n; ++j) {
             const llama_pos p = batch.pos[i] - (llama_pos) (n - j);
             if (p < 0) continue;
-            auto it = in_batch.find(key(s, p));
-            if (it != in_batch.end()) { res[(size_t) i*n + j] = it->second; continue; }
-            for (uint32_t c = 0; c < kv.size; ++c) {
-                const auto & cell = kv.cells[c];
-                if (cell.pos == p && cell.has_seq_id(s)) { res[(size_t) i*n + j] = cell.tok; break; }
-            }
+            auto it = tokens.find(key(seq_of(i), p));
+            if (it != tokens.end()) res[(size_t) i*n + j] = it->second;
         }
     }
 }
@@ -5305,10 +5325,9 @@ static void llama_set_engram_rows(llama_context & lctx, const llama_batch & batc
         }
     }
 #if defined(__linux__) || defined(__APPLE__)
-    // The table is memory-mapped and read lazily by get_rows: a row this process has not
-    // touched is a synchronous major fault at NVMe latency inside the graph, 41-62 of them
-    // per token on new text (measured 2026-09-14, 13.6 tok/s against 18.8 with the rows
-    // cached). The ids are known here, before the graph runs, so start the reads now.
+    // The table is memory-mapped and read lazily by get_rows, so a row this process has not
+    // touched is a synchronous major fault inside the graph. The ids are known here, before
+    // the graph runs: start the reads now and let them overlap the rest of the input setup.
     {
         const uint32_t il = hp.engram_layer_ids[eg];
         const ggml_tensor * w = il < model.layers.size() ? model.layers[il].engram_embd : nullptr;
@@ -10667,6 +10686,9 @@ struct llama_data_write {
                 // pooling state, which this per-layer layout does not describe yet. Save nothing
                 // for the compressed streams; the raw window still round-trips.
                 if (ctx->model.hparams.dsv4_shared_streams) {
+                    if (il == 0) {
+                        LLAMA_LOG_WARN("%s: DeepSeek-V4.1 compressed-stream state is not saved; a restored session re-derives it from the prompt\n", __func__);
+                    }
                     write(&layer_type, sizeof(layer_type));
                     continue;
                 }
